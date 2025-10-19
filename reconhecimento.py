@@ -1,75 +1,72 @@
+import os
+import time
 import cv2
 import mediapipe as mp
-import joblib
 import numpy as np
+import pickle
+from sklearn.preprocessing import StandardScaler
 
-print("=== Reconhecimento em tempo real Libras ===")
+# ===== Carrega modelo treinado =====
+with open('modelo_libras.pkl', 'rb') as f:
+    modelo = pickle.load(f)
 
-# Carregar modelo treinado
-clf = joblib.load("modelo_libras.pkl")
-classes = clf.classes_
-
-# Inicializar captura de vídeo e MediaPipe
-video = cv2.VideoCapture(0)
-hand = mp.solutions.hands
-Hand = hand.Hands(max_num_hands=1, 
-                  min_detection_confidence=0.7, 
-                  min_tracking_confidence=0.5)
+# ===== Inicializa MediaPipe =====
+mpHands = mp.solutions.hands
 mpDraw = mp.solutions.drawing_utils
+hands = mpHands.Hands(static_image_mode=True, max_num_hands=1, min_detection_confidence=0.5)
 
+# ===== Função para extrair pontos normalizados =====
 def extrair_pontos_norm(handLms):
-    """Transforma landmarks em coordenadas normalizadas"""
     pontos = []
     coords = [(lm.x, lm.y) for lm in handLms.landmark]
-
-    # Ponto de referência = pulso (id 0)
     cx, cy = coords[0]
-
-    # Transformar em coordenadas relativas
     rel_coords = [(x - cx, y - cy) for x, y in coords]
-
-    # Normalizar pelo maior valor (escala)
     max_val = max(max(abs(x), abs(y)) for x, y in rel_coords)
     norm_coords = [(x / max_val, y / max_val) for x, y in rel_coords]
-
-    # Colocar em uma lista 1D
     for x, y in norm_coords:
         pontos.append(x)
         pontos.append(y)
-
     return pontos
 
-while True:
-    check, img = video.read()
+# ===== Função para processar uma imagem e prever letra =====
+def prever_letra(caminho_img):
+    img = cv2.imread(caminho_img)
+    if img is None:
+        print(f"❌ Erro ao ler {caminho_img}")
+        return None
+
     imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    result = Hand.process(imgRGB)
-    h, w, _ = img.shape
-    pontos = []
+    result = hands.process(imgRGB)
 
-    if result.multi_hand_landmarks:
-        for handLms in result.multi_hand_landmarks:
-            mpDraw.draw_landmarks(img, handLms, hand.HAND_CONNECTIONS)
+    if not result.multi_hand_landmarks:
+        print(f"⚠️ Nenhuma mão detectada em {os.path.basename(caminho_img)}")
+        return None
 
-            # Extrair pontos normalizados
-            pontos = extrair_pontos_norm(handLms)
+    for handLms in result.multi_hand_landmarks:
+        pontos = extrair_pontos_norm(handLms)
+        X = np.array(pontos).reshape(1, -1)
+        letra = modelo.predict(X)[0]
+        return letra
+    return None
 
-        if pontos:
-            probas = clf.predict_proba([pontos])[0]
-            idx = np.argmax(probas)
-            letra_pred = classes[idx]
-            conf = probas[idx]
+# ===== Monitora pasta e forma palavras =====
+pasta_uploads = "uploads"
+arquivos_processados = set()
+palavra_atual = ""
 
-            if conf > 0.7:
-                texto = f"Libras: {letra_pred} ({conf*100:.1f}%)"
-            else:
-                texto = "Libras: NULO"
+print("🧩 Monitorando novas imagens em:", os.path.abspath(pasta_uploads))
+print("Pressione Ctrl+C para encerrar.\n")
 
-            cv2.putText(img, texto, (50, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 4)
-
-    cv2.imshow("Reconhecimento Libras", img)
-    if cv2.waitKey(1) & 0xFF == 27:  # ESC para sair
-        break
-
-video.release()
-cv2.destroyAllWindows()
+try:
+    while True:
+        for arquivo in os.listdir(pasta_uploads):
+            caminho = os.path.join(pasta_uploads, arquivo)
+            if caminho not in arquivos_processados and arquivo.lower().endswith(('.jpg', '.png', '.jpeg')):
+                letra = prever_letra(caminho)
+                if letra:
+                    palavra_atual += letra
+                    print(f"🔠 Letra detectada: {letra} | Palavra atual: {palavra_atual}")
+                arquivos_processados.add(caminho)
+        time.sleep(1)  # evita uso excessivo de CPU
+except KeyboardInterrupt:
+    print("\n🛑 Monitoramento encerrado.")
