@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SignGlass</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      box-sizing: border-box;
+    }
+    *, *:before, *:after { box-sizing: inherit; }
+
+    body {
+      background-color: #111827;
+      color: #FFFFFF;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-top: 20px;
+    }
+    .header i { font-size: 32px; color: #FFFFFF; }
+    .header h1 {
+      color: #FFFFFF;
+      font-size: 1.875rem;
+      font-weight: bold;
+      margin-left: 8px;
+      margin: 0;
+    }
+    .section-title {
+      color: #FFFFFF;
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin: 10px 0 8px 0;
+    }
+
+    #traducao-box {
+      background-color: #FFFFFF;
+      color: #1f2937;
+      border-radius: 0.75rem;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -2px rgba(0,0,0,.05);
+      padding: 16px;
+      margin-bottom: 24px;
+      min-height: 100px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #traducao-texto { font-size: 1rem; margin: 0; }
+
+    #ouvir-btn {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 16px; margin-bottom: 40px;
+      background: none; border: none; color: #FFFFFF; cursor: pointer; width: 100%;
+    }
+    #ouvir-btn i { font-size: 50px; }
+    #ouvir-btn span { font-size: 1.125rem; margin-top: 8px; }
+    #ouvir-btn:hover { opacity: .8; }
+
+    #terminal-container {
+      background-color: #000000;
+      border-radius: 0.75rem;
+      padding: 12px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #terminal-logs {
+      flex: 1; overflow-y: scroll; color: #a3e635;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.875rem; white-space: pre-wrap; word-wrap: break-word; margin: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <i class="fas fa-glasses"></i>
+    <h1>SignGlass</h1>
+  </header>
+
+  <h2 class="section-title">Tradução das LIBRAS:</h2>
+  <div id="traducao-box">
+    <p id="traducao-texto">Aguardando conexão…</p>
+  </div>
+
+  <button id="ouvir-btn" aria-label="Ouvir a palavra atual">
+    <i class="fas fa-volume-up"></i>
+    <span>Ouvir</span>
+  </button>
+
+  <h2 class="section-title">Terminal:</h2>
+  <div id="terminal-container">
+    <pre id="terminal-logs">Iniciando o app…
+Configure a URL do backend e conecte-se.</pre>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    
+    const BACKEND_URL = "https://unexplodable-skylar-appreciatingly.ngrok-free.dev"; 
+   
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const traducaoTexto = document.getElementById('traducao-texto');
+      const terminalLogs   = document.getElementById('terminal-logs');
+      const ouvirBtn       = document.getElementById('ouvir-btn');
+
+      function log(message) {
+        const ts = new Date().toLocaleTimeString();
+        terminalLogs.textContent += `\n[${ts}] ${message}`;
+        terminalLogs.scrollTop = terminalLogs.scrollHeight;
+      }
+
+      let socket = null;
+      const url = BACKEND_URL.replace(/\/+$/, '');
+      log(`Tentando conectar via Socket.IO em ${url} …`);
+
+      socket = io(url, {
+        path: "/socket.io",
+        transports: ["websocket","polling"],
+        withCredentials: false,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 800
+      });
+
+      socket.on("connect", () => {
+        log("✅ Conectado ao backend (" + socket.id + ")");
+        traducaoTexto.textContent = "Aguardando sinais…";
+      });
+
+      socket.on("connect_error", (err) => {
+        log("❌ connect_error: " + err.message);
+      });
+
+      socket.on("disconnect", (reason) => {
+        log("⚠️ Desconectado: " + reason);
+        if (!traducaoTexto.textContent || traducaoTexto.textContent === "Aguardando sinais…") {
+          traducaoTexto.textContent = "Desconectado";
+        }
+      });
+
+      socket.on("nova_letra", ({ letra, palavra }) => {
+        traducaoTexto.textContent = palavra ?? "";
+        log(`🔠 nova_letra: ${letra} | palavra: "${palavra}"`);
+      });
+
+      socket.on("espaco", ({ palavra }) => {
+        traducaoTexto.textContent = palavra ?? "";
+        log(`␣ espaço | palavra: "${palavra}"`);
+      });
+
+      socket.on("reset", ({ palavra }) => {
+        traducaoTexto.textContent = palavra ?? "";
+        log("reset recebido");
+      });
+
+      ouvirBtn.addEventListener('click', () => {
+        const texto = (traducaoTexto.textContent || "").trim();
+        if (!texto) {
+          log("[APP] Nada para falar.");
+          return;
+        }
+        if (!("speechSynthesis" in window)) {
+          alert("Seu navegador não suporta síntese de voz.");
+          return;
+        }
+
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(texto);
+        utter.lang = "pt-BR";
+        utter.rate = 1.0; 
+        utter.pitch = 1.0; 
+        utter.onstart = () => log(`[APP] Falando: "${texto.substring(0, 32)}${texto.length>32?'…':''}"`);
+        utter.onerror = (e) => log(`[APP] Erro na fala: ${e.error || e.message}`);
+        utter.onend = () => log("[APP] Fala concluída.");
+        window.speechSynthesis.speak(utter);
+      });
+    });
+  </script>
+</body>
+</html>
