@@ -37,7 +37,6 @@
       color: #FFFFFF;
       font-size: 1.875rem;
       font-weight: bold;
-      margin-left: 8px;
       margin: 0;
     }
     .section-title {
@@ -53,7 +52,7 @@
       border-radius: 0.75rem;
       box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -2px rgba(0,0,0,.05);
       padding: 16px;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
       min-height: 100px;
       display: flex;
       justify-content: center;
@@ -61,14 +60,22 @@
     }
     #traducao-texto { font-size: 1rem; margin: 0; }
 
-    #ouvir-btn {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 16px; margin-bottom: 40px;
-      background: none; border: none; color: #FFFFFF; cursor: pointer; width: 100%;
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 28px;
     }
-    #ouvir-btn i { font-size: 50px; }
-    #ouvir-btn span { font-size: 1.125rem; margin-top: 8px; }
-    #ouvir-btn:hover { opacity: .8; }
+    .btn {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 14px 12px;
+      background: #1f2937; color: #fff;
+      border: 1px solid #374151; border-radius: 12px;
+      cursor: pointer;
+    }
+    .btn:hover { background: #111827; }
+    .btn i { font-size: 20px; }
+    .btn span { font-size: 1rem; }
 
     #terminal-container {
       background-color: #000000;
@@ -90,7 +97,7 @@
 
   <header class="header">
     <i class="fas fa-glasses"></i>
-    <h1> SignGlass</h1>
+    <h1>SignGlass</h1>
   </header>
 
   <h2 class="section-title">Tradução das LIBRAS:</h2>
@@ -98,10 +105,14 @@
     <p id="traducao-texto">Aguardando conexão…</p>
   </div>
 
-  <button id="ouvir-btn" aria-label="Ouvir a palavra atual">
-    <i class="fas fa-volume-up"></i>
-    <span>Ouvir</span>
-  </button>
+  <div class="actions">
+    <button id="ouvir-btn" class="btn" aria-label="Ouvir a palavra atual">
+      <i class="fas fa-volume-up"></i><span>Ouvir</span>
+    </button>
+    <button id="apagar-btn" class="btn" aria-label="Apagar palavra">
+      <i class="fas fa-backspace"></i><span>Apagar</span>
+    </button>
+  </div>
 
   <h2 class="section-title">Terminal:</h2>
   <div id="terminal-container">
@@ -111,14 +122,15 @@ Configure a URL do backend e conecte-se.</pre>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
-    
+  
     const BACKEND_URL = "https://unexplodable-skylar-appreciatingly.ngrok-free.dev"; 
-   
+    
 
     document.addEventListener('DOMContentLoaded', () => {
       const traducaoTexto = document.getElementById('traducao-texto');
-      const terminalLogs   = document.getElementById('terminal-logs');
-      const ouvirBtn       = document.getElementById('ouvir-btn');
+      const terminalLogs  = document.getElementById('terminal-logs');
+      const ouvirBtn      = document.getElementById('ouvir-btn');
+      const apagarBtn     = document.getElementById('apagar-btn');
 
       function log(message) {
         const ts = new Date().toLocaleTimeString();
@@ -126,6 +138,7 @@ Configure a URL do backend e conecte-se.</pre>
         terminalLogs.scrollTop = terminalLogs.scrollHeight;
       }
 
+      // Socket
       let socket = null;
       const url = BACKEND_URL.replace(/\/+$/, '');
       log(`Tentando conectar via Socket.IO em ${url} …`);
@@ -155,6 +168,7 @@ Configure a URL do backend e conecte-se.</pre>
         }
       });
 
+      
       socket.on("nova_letra", ({ letra, palavra }) => {
         traducaoTexto.textContent = palavra ?? "";
         log(`🔠 nova_letra: ${letra} | palavra: "${palavra}"`);
@@ -167,9 +181,10 @@ Configure a URL do backend e conecte-se.</pre>
 
       socket.on("reset", ({ palavra }) => {
         traducaoTexto.textContent = palavra ?? "";
-        log("reset recebido");
+        log("♻️ reset recebido");
       });
 
+      
       ouvirBtn.addEventListener('click', () => {
         const texto = (traducaoTexto.textContent || "").trim();
         if (!texto) {
@@ -180,16 +195,30 @@ Configure a URL do backend e conecte-se.</pre>
           alert("Seu navegador não suporta síntese de voz.");
           return;
         }
-
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(texto);
         utter.lang = "pt-BR";
-        utter.rate = 1.0; 
-        utter.pitch = 1.0; 
+        utter.rate = 1.0;
+        utter.pitch = 1.0;
         utter.onstart = () => log(`[APP] Falando: "${texto.substring(0, 32)}${texto.length>32?'…':''}"`);
         utter.onerror = (e) => log(`[APP] Erro na fala: ${e.error || e.message}`);
         utter.onend = () => log("[APP] Fala concluída.");
         window.speechSynthesis.speak(utter);
+      });
+
+      // Apagar palavra
+      apagarBtn.addEventListener('click', async () => {
+        try {
+          const res = await fetch(url + "/reset", { method: "POST", mode: "cors" });
+          const txt = await res.text().catch(()=> "");
+          log(`POST /reset → ${res.status} ${txt}`);
+          if (res.ok) {
+            
+            traducaoTexto.textContent = "";
+          }
+        } catch (e) {
+          log("Erro ao chamar /reset: " + e.message);
+        }
       });
     });
   </script>
